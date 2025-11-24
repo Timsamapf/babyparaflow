@@ -13,7 +13,7 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({ isOpen, title, dat
   if (!isOpen || !data) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] bg-white flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-300">
+    <div className="absolute inset-0 z-[100] bg-white flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-300">
       
       {/* Header */}
       <div className="h-14 border-b border-slate-100 flex items-center justify-between px-6 shrink-0 bg-white/80 backdrop-blur-sm z-10">

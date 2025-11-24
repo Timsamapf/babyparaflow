@@ -103,11 +103,10 @@ export const ScreenNode: React.FC<ScreenNodeProps> = ({ title, data, loading, on
         )}
 
         {/* Rendered HTML Content */}
-        <div 
+        <div
             className="flex-1 overflow-y-auto relative bg-white custom-scrollbar"
-            dangerouslySetInnerHTML={{ __html: data.htmlContent }} 
+            dangerouslySetInnerHTML={{ __html: data.htmlContent }}
             onWheel={(e) => e.stopPropagation()} // Prevent canvas zoom when scrolling content
-            onMouseDown={(e) => e.stopPropagation()} // Prevent drag when interacting with content
         />
 
         {/* Mobile Bottom Bezel */}

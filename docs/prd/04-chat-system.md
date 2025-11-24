@@ -86,15 +86,106 @@ interface PlanStep {
 
 #### 4.1 输入框
 - **位置**：底部固定
-- **样式**：圆角，灰色背景
-- **Placeholder**：根据状态变化
-  - 初始："Describe your app idea..."
-  - Simulation 后："Reply to agent..."
+- **样式**：圆角，灰色背景，textarea 多行支持
+- **Placeholder**："Type @ to mention files or describe your app idea..."
+- **快捷键**：
+  - Enter：发送消息
+  - Shift+Enter：换行
+  - Esc：关闭 @ Mention Popover
 
 #### 4.2 发送消息
 - Enter 键或点击发送按钮
 - 自动清空输入框
 - 添加到消息历史
+- 清空已提及的节点列表
+
+#### 4.3 @ Mention 功能
+
+##### 4.3.1 触发方式
+**方式 1：文本输入触发**
+- 在输入框输入 `@` 字符
+- 必须在开头或空格后输入
+- 自动显示 Mention Popover
+
+**方式 2：Canvas 选择触发**
+- 在 Popover 中选择 "Select from Canvas"
+- 进入 Canvas 选择模式
+- 点击任意节点完成 mention
+
+##### 4.3.2 Mention Popover 界面
+```
+┌─────────────────────────────┐
+│ @ Mention                   │ ← Header
+├─────────────────────────────┤
+│ 🖱️ @ Select from Canvas    │ ← Canvas 选择选项（蓝色）
+├─────────────────────────────┤
+│ 📄 Product Charter (DOC)    │ ← 节点选项 1
+│ 📊 User Flow (WHITEBOARD)   │ ← 节点选项 2
+│ 📱 Home Screen (SCREEN)     │ ← 节点选项 3
+└─────────────────────────────┘
+```
+
+**Popover 特性**：
+- 最大高度：256px（超出滚动）
+- 实时搜索过滤
+- 键盘导航：↑/↓ 选择，Enter 确认，Esc 关闭
+- 图标颜色按节点类型区分
+
+##### 4.3.3 Canvas 选择模式
+**视觉反馈**：
+- 光标变为 pointer
+- Hover 节点显示**蓝色高亮框**（`ring-4 ring-blue-500/50`）
+- 其他交互（拖动、选择）被禁用
+
+**退出方式**：
+- 点击任意节点（自动退出）
+- 按 Esc 键（手动退出）
+- 点击 Canvas 空白区域
+
+##### 4.3.4 Mention 视觉效果
+**输入框中**：
+- 格式：`@节点名称`
+- 光标定位在节点名称之后
+- 支持多个 mention（空格分隔）
+
+**Canvas 上**：
+- 被 mention 的节点显示**蓝色边框**（`ring-2 ring-blue-500`）
+- 节点左上方显示蓝色 Badge：`@节点名称 ×`
+- Badge 跟随节点移动（包括拖动、缩放）
+- 节点设置 `overflow-visible` 以显示 Badge
+
+**消息历史中**：
+- Mention 按节点类型显示彩色文本
+- DOCUMENT: 蓝色
+- WHITEBOARD: 紫色
+- SCREEN: 翠绿色
+- TABLE: 橙色
+- API: 玫瑰色
+- TASK: 灰色
+- INTEGRATION: 靛蓝色
+
+##### 4.3.5 删除 Mention
+**方式 1：输入框删除**
+- 直接删除 `@节点名称` 文本
+- Canvas 上的边框和 Badge 不会自动消失（需手动删除）
+
+**方式 2：Badge 删除**
+- 点击 Badge 上的 `×` 按钮
+- 同步从输入框删除对应的 `@节点名称`
+- 清除 Canvas 上的蓝色边框和 Badge
+
+##### 4.3.6 发送后行为
+- 输入框清空
+- 所有 mention 的视觉效果清除（边框和 Badge 消失）
+- `mentionedNodeIds` 状态重置为空数组
+
+### 5. Simulation 触发
+
+#### 5.1 自动触发机制
+- 在输入框输入**任意内容**并发送
+- 自动触发 `runSimulation()` 函数
+- 启动自动化演示流程
+- 用户无需输入特定命令，任何消息都会触发 simulation
 
 ## 界面设计
 

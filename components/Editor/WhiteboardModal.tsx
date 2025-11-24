@@ -210,7 +210,7 @@ export const WhiteboardModal: React.FC<WhiteboardModalProps> = ({ isOpen, title,
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] bg-slate-50 flex flex-col animate-in fade-in duration-200">
+    <div className="absolute inset-0 z-[100] bg-slate-50 flex flex-col animate-in fade-in duration-200">
        {/* Header */}
        <div className="h-14 border-b border-slate-200 flex items-center justify-between px-4 bg-white z-10 shadow-sm">
           <button onClick={handleClose} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors">

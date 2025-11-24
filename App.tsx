@@ -674,12 +674,18 @@ const App = () => {
   const [nodes, setNodes] = useState<CanvasNode[]>([]);
   const [edges, setEdges] = useState<CanvasEdge[]>([]);
   const [pins, setPins] = useState<CanvasPin[]>([]);
+  const [sections, setSections] = useState<any[]>([]); // Will be populated during simulation or user creation
   const [messages, setMessages] = useState<ChatMessage[]>([
-      { id: 'welcome', role: 'ai', content: 'Hi! I can help you turn your idea into a full product prototype. Click "Start Simulation" to see me in action!', timestamp: Date.now() }
+      { id: 'welcome', role: 'ai', content: 'Hi! I can help you turn your idea into a full product prototype. Just describe your app idea to get started!', timestamp: Date.now() }
   ]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [simulationStarted, setSimulationStarted] = useState(false);
+
+  // Canvas @ Mention State
+  const [isCanvasSelectionMode, setIsCanvasSelectionMode] = useState(false);
+  const [mentionedNodeIds, setMentionedNodeIds] = useState<string[]>([]);
+  const [selectedNodeForMention, setSelectedNodeForMention] = useState<{ nodeId: string; nodeTitle: string } | null>(null);
 
   // Camera State (Lifted)
   const [view, setView] = useState<CanvasView>({ 
@@ -1076,6 +1082,15 @@ const App = () => {
       else if (node.type === NodeType.INTEGRATION) setEditingIntegrationId(id);
   };
 
+  const handleDeleteNodes = (ids: string[]) => {
+      // Delete nodes
+      setNodes(prev => prev.filter(n => !ids.includes(n.id)));
+      // Delete related edges
+      setEdges(prev => prev.filter(e => !ids.includes(e.from) && !ids.includes(e.to)));
+      // Delete related pins
+      setPins(prev => prev.filter(p => !ids.includes(p.targetNodeId)));
+  };
+
   const handleNavigate = (targetId: string) => {
     setRunningScreenId(targetId);
   };
@@ -1134,21 +1149,78 @@ const App = () => {
       return node && node.type === NodeType.TABLE ? node.data as TableData : null;
   }
 
+  // Canvas @ Mention Handlers
+  const handleEnterCanvasSelection = () => {
+    setIsCanvasSelectionMode(true);
+  };
+
+  const handleNodeMentionSelect = (nodeId: string) => {
+    const node = nodes.find(n => n.id === nodeId);
+    if (node) {
+      // Add to mentioned nodes if not already there
+      if (!mentionedNodeIds.includes(nodeId)) {
+        setMentionedNodeIds(prev => [...prev, nodeId]);
+      }
+      // Set selected node for mention (to trigger input insertion in ChatSidebar)
+      setSelectedNodeForMention({ nodeId: node.id, nodeTitle: node.title });
+      // Exit selection mode
+      setIsCanvasSelectionMode(false);
+    }
+  };
+
+  const handleClearSelectedNode = () => {
+    setSelectedNodeForMention(null);
+  };
+
+  const handleRemoveMention = (nodeId: string) => {
+    // Remove from mentioned nodes
+    setMentionedNodeIds(prev => prev.filter(id => id !== nodeId));
+
+    // Note: Removing from input text is handled by ChatSidebar's internal logic
+    // We set a flag to trigger text removal
+    const node = nodes.find(n => n.id === nodeId);
+    if (node) {
+      setSelectedNodeForMention({ nodeId: node.id, nodeTitle: `REMOVE:${node.title}` });
+    }
+  };
+
+  const handleSendMessage = (content: string) => {
+    setMessages(p => [...p, { id: Date.now().toString(), role: 'user', content, timestamp: Date.now() }]);
+    // Clear mentioned nodes after sending
+    setMentionedNodeIds([]);
+  };
+
+  // ESC key to exit canvas selection mode
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isCanvasSelectionMode) {
+        setIsCanvasSelectionMode(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isCanvasSelectionMode]);
+
   return (
     <div className="flex w-full h-screen bg-slate-50 overflow-hidden">
-      <ChatSidebar 
-        messages={messages} 
-        onSendMessage={(msg) => setMessages(p => [...p, { id: Date.now().toString(), role: 'user', content: msg, timestamp: Date.now() }])} 
+      <ChatSidebar
+        messages={messages}
+        onSendMessage={handleSendMessage}
         onStartSimulation={runSimulation}
         isProcessing={isProcessing}
         isOpen={isSidebarOpen}
         onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
-        simulationStarted={simulationStarted}
+        nodes={nodes}
+        sections={sections}
+        onEnterCanvasSelection={handleEnterCanvasSelection}
+        mentionedNodeIds={mentionedNodeIds}
+        selectedNodeForMention={selectedNodeForMention}
+        onClearSelectedNode={handleClearSelectedNode}
       />
 
       <main className="flex-1 relative h-full">
-        <CanvasContainer 
-            nodes={nodes} 
+        <CanvasContainer
+            nodes={nodes}
             edges={edges}
             pins={pins}
             view={view}
@@ -1161,39 +1233,32 @@ const App = () => {
             onRunNode={setRunningScreenId}
             onAddPinClick={onAddPinStart}
             onDeletePin={handleDeletePin}
+            onDeleteNodes={handleDeleteNodes}
+            isCanvasSelectionMode={isCanvasSelectionMode}
+            mentionedNodeIds={mentionedNodeIds}
+            onNodeMentionSelect={handleNodeMentionSelect}
+            onRemoveMention={handleRemoveMention}
         />
 
         {runningScreenId && (
-          <ImmersiveView 
+          <ImmersiveView
              data={getRunningScreenData()!}
              onClose={() => setRunningScreenId(null)}
              onNavigate={handleNavigate}
           />
         )}
-      </main>
 
-      {/* Pin Creation Modal */}
-      {newPinPos && (
-          <PinModal 
-              isOpen={true}
-              position={newPinPos}
-              nodes={nodes}
-              onSave={handleSavePin}
-              onClose={() => { setNewPinPos(null); setPendingPinCanvasPos(null); }}
-          />
-      )}
-
-      {editingDocId && (
-          <MarkdownModal 
+        {editingDocId && (
+          <MarkdownModal
               isOpen={true}
               title={getMarkdownModalProps().title}
               initialContent={getMarkdownModalProps().content}
               onSave={(c) => setNodes(prev => prev.map(n => n.id === editingDocId ? { ...n, data: { ...n.data, [n.type === NodeType.SCREEN ? 'plan' : 'content']: c } as any } : n))}
               onClose={() => setEditingDocId(null)}
           />
-      )}
+        )}
 
-      {editingWhiteboardId && (
+        {editingWhiteboardId && (
           <WhiteboardModal
               isOpen={true}
               title="Chart Editor"
@@ -1201,26 +1266,38 @@ const App = () => {
               onSave={(d) => setNodes(prev => prev.map(n => n.id === editingWhiteboardId ? { ...n, data: d } : n))}
               onClose={() => setEditingWhiteboardId(null)}
           />
-      )}
+        )}
 
-      {editingTableId && (
+        {editingTableId && (
           <DatabaseModal
               isOpen={true}
               title={nodes.find(n => n.id === editingTableId)?.title || 'Table'}
               data={getTableData()}
               onClose={() => setEditingTableId(null)}
           />
-      )}
+        )}
 
-      {editingIntegrationId && (
+        {editingIntegrationId && (
           <IntegrationModal
               isOpen={true}
               title={nodes.find(n => n.id === editingIntegrationId)?.title || 'Integration'}
               initialData={nodes.find(n => n.id === editingIntegrationId)?.data as IntegrationData}
-              onSave={(d) => setNodes(prev => prev.map(n => 
+              onSave={(d) => setNodes(prev => prev.map(n =>
                 n.id === editingIntegrationId ? { ...n, data: d } : n
               ))}
               onClose={() => setEditingIntegrationId(null)}
+          />
+        )}
+      </main>
+
+      {/* Pin Creation Modal - stays outside main, uses fixed positioning with calculated coords */}
+      {newPinPos && (
+          <PinModal
+              isOpen={true}
+              position={newPinPos}
+              nodes={nodes}
+              onSave={handleSavePin}
+              onClose={() => { setNewPinPos(null); setPendingPinCanvasPos(null); }}
           />
       )}
     </div>

@@ -8,6 +8,7 @@ import { APINode } from './nodes/APINode';
 import { TaskNode } from './nodes/TaskNode';
 import { IntegrationNode } from './nodes/IntegrationNode';
 import { PinMarker } from './PinMarker';
+import { MentionBadge } from './MentionBadge';
 import { MOBILE_SCREEN_WIDTH, MOBILE_SCREEN_HEIGHT, WEB_SCREEN_WIDTH, WEB_SCREEN_HEIGHT, MIN_ZOOM, MAX_ZOOM, SECTION_IDS } from '../../constants';
 import { Plus, Minus, FileText, GitBranch, Smartphone, GripHorizontal, MousePointer2, Hand, BoxSelect, MapPin, Table as TableIcon, Globe, CheckSquare, Zap, Link2, Database } from 'lucide-react';
 
@@ -25,6 +26,11 @@ interface CanvasContainerProps {
   onRunNode: (id: string) => void;
   onAddPinClick?: (x: number, y: number) => void;
   onDeletePin?: (id: string) => void;
+  onDeleteNodes?: (ids: string[]) => void;
+  isCanvasSelectionMode?: boolean;
+  mentionedNodeIds?: string[];
+  onNodeMentionSelect?: (nodeId: string) => void;
+  onRemoveMention?: (nodeId: string) => void;
 }
 
 interface SectionBounds {
@@ -164,20 +170,25 @@ const SectionContainer = ({
     );
 };
 
-export const CanvasContainer: React.FC<CanvasContainerProps> = ({ 
-    nodes, 
-    edges = [], 
+export const CanvasContainer: React.FC<CanvasContainerProps> = ({
+    nodes,
+    edges = [],
     pins = [],
     view,
     onViewChange,
-    onNodeMove, 
-    onBatchNodeMove, 
-    onNodeSectionChange, 
-    onAddNode, 
-    onEditNode, 
+    onNodeMove,
+    onBatchNodeMove,
+    onNodeSectionChange,
+    onAddNode,
+    onEditNode,
     onRunNode,
     onAddPinClick,
-    onDeletePin
+    onDeletePin,
+    onDeleteNodes,
+    isCanvasSelectionMode = false,
+    mentionedNodeIds = [],
+    onNodeMentionSelect,
+    onRemoveMention
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   
@@ -206,6 +217,11 @@ export const CanvasContainer: React.FC<CanvasContainerProps> = ({
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
   const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
+  // Selection & Hover State
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const [mouseDownPos, setMouseDownPos] = useState<{ x: number, y: number } | null>(null);
 
   // Calculate Auto Sections
   const docNodes = useMemo(() => nodes.filter(n => n.sectionId === SECTION_IDS.DOCUMENT), [nodes]);
@@ -278,11 +294,26 @@ export const CanvasContainer: React.FC<CanvasContainerProps> = ({
 
       if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomIn(); }
       if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomOut(); }
-      
+
       if (e.code === 'Space') { setIsSpacePressed(true); }
       if (e.key === 'v' || e.key === 'V') { setActiveTool('SELECT'); }
       if (e.key === 'h' || e.key === 'H') { setActiveTool('HAND'); }
       if (e.key === 'p' || e.key === 'P') { setActiveTool('PIN'); }
+
+      // Selection shortcuts
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setSelectedNodeIds([]);
+        // Note: Canvas selection mode exit will be handled by App.tsx
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        if (selectedNodeIds.length > 0) {
+          // Delete selected nodes
+          onDeleteNodes?.(selectedNodeIds);
+          setSelectedNodeIds([]);
+        }
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -295,7 +326,7 @@ export const CanvasContainer: React.FC<CanvasContainerProps> = ({
         window.removeEventListener('keydown', handleKeyDown);
         window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [view]);
+  }, [view, selectedNodeIds]);
 
   const effectiveTool = isSpacePressed ? 'HAND' : activeTool;
 
@@ -303,17 +334,20 @@ export const CanvasContainer: React.FC<CanvasContainerProps> = ({
   const handleMouseDown = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     const canvasPos = getCanvasCoords(e.clientX, e.clientY);
-    
+
     // Interaction Check (ignore UI elements but not for PIN tool which can click anywhere)
     if (target.closest('button') || target.closest('input') || target.closest('textarea')) {
         // Exception: If using PIN tool, we might want to pin specific buttons, but for now prevent UI interference
         return;
     }
 
+    // Record mouse down position for click vs drag distinction
+    setMouseDownPos({ x: e.clientX, y: e.clientY });
+
     // 1. PIN Logic
     if (effectiveTool === 'PIN') {
         onAddPinClick?.(canvasPos.x, canvasPos.y);
-        // Optional: Switch back to select or stay in pin mode? 
+        // Optional: Switch back to select or stay in pin mode?
         // Let's stay in PIN mode for multiple pins, user must switch back manually.
         return;
     }
@@ -326,23 +360,55 @@ export const CanvasContainer: React.FC<CanvasContainerProps> = ({
         return;
     }
 
-    // 3. Node Dragging
+    // 3. Node Interaction (Canvas Selection Mode or SELECT tool)
     const nodeEl = target.closest('.canvas-node');
+
+    // Canvas Selection Mode - just select the node for mentioning
+    if (nodeEl && isCanvasSelectionMode) {
+        const nodeId = nodeEl.getAttribute('data-id');
+        if (nodeId) {
+            e.preventDefault();
+            e.stopPropagation();
+            onNodeMentionSelect?.(nodeId);
+        }
+        return;
+    }
+
+    // Normal SELECT tool interaction
     if (nodeEl && effectiveTool === 'SELECT') {
         const nodeId = nodeEl.getAttribute('data-id');
         if (nodeId) {
-            e.preventDefault(); 
+            e.preventDefault();
             e.stopPropagation();
             const node = nodes.find(n => n.id === nodeId);
             if (node) {
+                // If node is not selected, select it (or add to selection with Shift)
+                if (!selectedNodeIds.includes(nodeId)) {
+                    if (e.shiftKey) {
+                        // Add to selection
+                        setSelectedNodeIds(prev => [...prev, nodeId]);
+                    } else {
+                        // Replace selection
+                        setSelectedNodeIds([nodeId]);
+                    }
+                } else if (e.shiftKey) {
+                    // If Shift is pressed and node is already selected, deselect it
+                    setSelectedNodeIds(prev => prev.filter(id => id !== nodeId));
+                }
+                // Start dragging
                 setDraggedNodeId(nodeId);
                 setDragOffset({ x: canvasPos.x - node.x, y: canvasPos.y - node.y });
             }
         }
         return;
     }
-    
-    // 4. Panning (Hand Tool or Canvas Click)
+
+    // 4. Canvas Background Click (deselect when clicking empty space)
+    if (effectiveTool === 'SELECT') {
+        // Will be handled in mouseUp if it's a click (not drag)
+    }
+
+    // 5. Panning (Hand Tool or Canvas Click)
     setIsDraggingCanvas(true);
     setLastMousePos({ x: e.clientX, y: e.clientY });
   };
@@ -383,9 +449,29 @@ export const CanvasContainer: React.FC<CanvasContainerProps> = ({
       return;
     }
 
-    // Dragging
+    // Dragging nodes
     if (draggedNodeId) {
-        onNodeMove(draggedNodeId, currentPos.x - dragOffset.x, currentPos.y - dragOffset.y);
+        const draggedNode = nodes.find(n => n.id === draggedNodeId);
+        if (!draggedNode) return;
+
+        // If dragged node is in selection, move all selected nodes
+        if (selectedNodeIds.includes(draggedNodeId) && selectedNodeIds.length > 1) {
+            // Batch move all selected nodes
+            const newX = currentPos.x - dragOffset.x;
+            const newY = currentPos.y - dragOffset.y;
+            const dx = newX - draggedNode.x;
+            const dy = newY - draggedNode.y;
+
+            const updates = selectedNodeIds.map(id => ({
+                id,
+                dx,
+                dy
+            }));
+            onBatchNodeMove(updates);
+        } else {
+            // Single node move
+            onNodeMove(draggedNodeId, currentPos.x - dragOffset.x, currentPos.y - dragOffset.y);
+        }
     }
 
     if (draggedSectionId) {
@@ -410,7 +496,12 @@ export const CanvasContainer: React.FC<CanvasContainerProps> = ({
     }
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (e: React.MouseEvent) => {
+    // Check if it was a click (not drag) - distance < 5px
+    const wasClick = mouseDownPos &&
+      Math.abs(e.clientX - mouseDownPos.x) < 5 &&
+      Math.abs(e.clientY - mouseDownPos.y) < 5;
+
     if (isDrawing && ghostBox) {
         // Finalize Creation
         if (ghostBox.w > 50 && ghostBox.h > 50) {
@@ -475,9 +566,19 @@ export const CanvasContainer: React.FC<CanvasContainerProps> = ({
         setActiveTool('SELECT'); // Reset to Select after draw
     }
 
+    // Handle click on canvas background (deselect all)
+    if (wasClick && !draggedNodeId && effectiveTool === 'SELECT' && !e.shiftKey) {
+        const target = e.target as HTMLElement;
+        // Check if clicked on canvas background (not on a node)
+        if (!target.closest('.canvas-node') && !target.closest('.canvas-section')) {
+            setSelectedNodeIds([]);
+        }
+    }
+
     setIsDraggingCanvas(false);
     setDraggedNodeId(null);
     setDraggedSectionId(null);
+    setMouseDownPos(null);
   };
 
   const handleWheel = (e: React.WheelEvent) => {
@@ -670,15 +771,28 @@ export const CanvasContainer: React.FC<CanvasContainerProps> = ({
             {/* --- NODES --- */}
             {nodes.map(node => {
                 const dims = getNodeDimensions(node);
+                const isSelected = selectedNodeIds.includes(node.id);
+                const isMentioned = mentionedNodeIds.includes(node.id);
+                const isHovered = hoveredNodeId === node.id && !isSelected && !isMentioned;
+                const isHoveredInSelectionMode = isCanvasSelectionMode && hoveredNodeId === node.id;
+                const isDragging = draggedNodeId === node.id;
+
                 return (
                 <div
                     key={node.id}
                     data-id={node.id}
-                    className={`canvas-node absolute shadow-sm transition-all duration-500 hover:shadow-2xl rounded-2xl overflow-hidden bg-white
+                    className={`canvas-node absolute shadow-sm transition-all duration-200 rounded-2xl bg-white
                         ${node.type === NodeType.SCREEN ? 'z-20' : 'z-10'}
-                        ${draggedNodeId === node.id ? 'ring-4 ring-blue-400/30 scale-[1.02] cursor-grabbing shadow-2xl' : ''}
+                        ${isHovered ? 'ring-4 ring-emerald-500/50 shadow-xl' : ''}
+                        ${isHoveredInSelectionMode ? 'ring-4 ring-blue-500/50 shadow-xl' : ''}
+                        ${isSelected ? 'ring-2 ring-emerald-500' : ''}
+                        ${isMentioned ? 'ring-2 ring-blue-500 overflow-visible' : 'overflow-hidden'}
+                        ${isDragging ? 'scale-[1.02] cursor-grabbing' : ''}
+                        ${isCanvasSelectionMode ? 'cursor-pointer' : ''}
                     `}
                     style={{ left: node.x, top: node.y, width: dims.width, height: dims.height }}
+                    onMouseEnter={() => setHoveredNodeId(node.id)}
+                    onMouseLeave={() => setHoveredNodeId(null)}
                 >
                     {node.type === NodeType.DOCUMENT && (
                         <DocumentNode title={node.title} data={node.data as any} loading={node.status === 'loading'} onEdit={() => onEditNode(node.id)} />
@@ -700,6 +814,14 @@ export const CanvasContainer: React.FC<CanvasContainerProps> = ({
                     )}
                     {node.type === NodeType.INTEGRATION && (
                         <IntegrationNode title={node.title} data={node.data as IntegrationData} loading={node.status === 'loading'} onEdit={() => onEditNode(node.id)} />
+                    )}
+
+                    {/* Mention Badge */}
+                    {isMentioned && onRemoveMention && (
+                        <MentionBadge
+                            nodeTitle={node.title}
+                            onRemove={() => onRemoveMention(node.id)}
+                        />
                     )}
                 </div>
             )})}
